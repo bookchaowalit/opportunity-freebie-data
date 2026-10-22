@@ -8,8 +8,10 @@ import re
 import sys
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import Any
 
 from .cli import resource, validate
+from .observability import init_sentry, report_exit
 
 
 class Text(HTMLParser):
@@ -46,7 +48,9 @@ def _normalize_generic(raw, source, checked_at):
     if not all(marker.casefold() in folded for marker in markers):
         raise ValueError("generic freebie source drift or challenge page")
     schema = resource("schema-v2.json")
-    terms = {key: None for key in schema["properties"]["items"]["items"]["properties"]["terms"]["properties"]}
+    terms: dict[str, Any] = {
+        key: None for key in schema["properties"]["items"]["items"]["properties"]["terms"]["properties"]
+    }
     terms.update(source.get("normalized_terms", {}))
     record_id = source["id"]
     item = {
@@ -91,10 +95,12 @@ def normalize(raw, source, checked_at):
     if source.get("generic_html"):
         return _normalize_generic(raw, source, checked_at)
     schema = resource("schema-v2.json")
-    terms = {key: None for key in schema["properties"]["items"]["items"]["properties"]["terms"]["properties"]}
-    deadline = {"kind": "unknown", "at": None}
+    terms: dict[str, Any] = {
+        key: None for key in schema["properties"]["items"]["items"]["properties"]["terms"]["properties"]
+    }
+    deadline: dict[str, Any] = {"kind": "unknown", "at": None}
     status = "unknown"
-    countries = []
+    countries: list[str] = []
     if source["access"] == "github-api":
         body = json.loads(raw)
         if not isinstance(body, dict):
@@ -210,7 +216,9 @@ def main(argv=None):
 
     if VERSION != 1:
         raise RuntimeError("unsupported shared capture runtime")
-    return run(source_config(selected.source_id), normalize, validate, remaining)
+    source = source_config(selected.source_id)
+    sentry = init_sentry(source["id"])
+    return report_exit(sentry, source["id"], run(source, normalize, validate, remaining))
 
 
 if __name__ == "__main__":
